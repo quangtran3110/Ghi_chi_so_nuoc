@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ghi Chỉ Số Nước</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+      body { background-color: #f8f9fa; padding: 10px; }
+      .container { max-width: 600px; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin: 0 auto; }
+      #suggestion-box { position: absolute; z-index: 1000; width: 90%; background: white; border: 1px solid #ddd; max-height: 200px; overflow-y: auto; display: none; }
+      .suggestion-item { padding: 10px; border-bottom: 1px solid #eee; cursor: pointer; }
+      .suggestion-item:hover { background-color: #f0f0f0; }
+      #camera-container { display: none; margin-top: 10px; text-align: center; }
+      video, canvas { width: 100%; max-width: 400px; border-radius: 8px; border: 2px solid #333; }
+      .loading { display: none; text-align: center; margin-top: 20px; }
+      .preview-image { max-width: 100px; margin-top: 5px; border-radius: 5px; display: none;}
+    </style>
+</head>
+<body>
+    <div class="container">
+      <h3 class="text-center text-primary mb-4">Ghi Chỉ Số Nước</h3>
+      
+      <div class="mb-3 position-relative">
+        <label for="searchInput" class="form-label fw-bold">Tìm khách hàng (Tên hoặc Mã)</label>
+        <input type="text" class="form-control" id="searchInput" placeholder="Nhập tên hoặc mã..." autocomplete="off">
+        <div id="suggestion-box"></div>
+      </div>
+
+      <div id="inputForm" style="display:none;">
+        <div class="alert alert-info" id="customerInfo"></div>
+        <input type="hidden" id="rowIndex">
+        <input type="hidden" id="maKH_hidden">
+
+        <div class="mb-3">
+          <label class="form-label fw-bold">Chỉ số mới (Cột R)</label>
+          <input type="number" class="form-control" id="newIndex" inputmode="numeric">
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Số người/hộ (Cột S)</label>
+          <input type="number" class="form-control" id="peopleCount">
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Ghi chú (Cột T)</label>
+          <textarea class="form-control" id="note" rows="2"></textarea>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label fw-bold">Ảnh đồng hồ (Cột U)</label>
+          <br>
+          <button type="button" class="btn btn-outline-secondary w-100" onclick="startCamera()">📷 Mở Camera</button>
+          
+          <div id="camera-container">
+            <video id="video" playsinline autoplay></video>
+            <button type="button" class="btn btn-danger mt-2" onclick="takePhoto()">Chụp hình</button>
+          </div>
+          
+          <canvas id="canvas" style="display:none;"></canvas>
+          <input type="hidden" id="imageData">
+          <div class="mt-2 text-center">
+             <img id="previewParams" class="preview-image">
+             <span id="photoStatus" class="text-success small"></span>
+          </div>
+        </div>
+
+        <button type="button" class="btn btn-primary w-100 py-2" onclick="checkAndSubmit()">LƯU DỮ LIỆU</button>
+      </div>
+      
+      <div class="loading" id="loadingSpinner">
+        <div class="spinner-border text-primary" role="status"></div>
+        <p>Đang kết nối Server...</p>
+      </div>
+    </div>
+
+    <script>
+      // ============================================================
+      // CẤU HÌNH: Dán link Google Apps Script Deployment vào đây
+      // Ví dụ: https://script.google.com/macros/s/AKfycbx.../exec
+      const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwDn7TPwcWKd8UeW-evnge8chNANTfX5DSvmVuM54GM8-DSQPAHmLdAiJwKkXt1uJ8ZHA/exec"; 
+      // ============================================================
+
+      let searchTimeout;
+
+      // 1. TÌM KIẾM
+      document.getElementById('searchInput').addEventListener('input', function() {
+        clearTimeout(searchTimeout);
+        const query = this.value;
+        if (query.length < 2) {
+          document.getElementById('suggestion-box').style.display = 'none';
+          return;
+        }
+        
+        searchTimeout = setTimeout(() => {
+          fetch(`${SCRIPT_URL}?action=search&query=${encodeURIComponent(query)}`)
+            .then(res => res.json())
+            .then(data => showSuggestions(data))
+            .catch(err => console.error(err));
+        }, 400);
+      });
+
+      function showSuggestions(data) {
+        const box = document.getElementById('suggestion-box');
+        box.innerHTML = '';
+        if (!data || data.length === 0) {
+          box.style.display = 'none';
+          return;
+        }
+        
+        data.forEach(item => {
+          const div = document.createElement('div');
+          div.className = 'suggestion-item';
+          div.innerHTML = `<strong>${item.tenKH}</strong> <br> <small class="text-muted">Mã: ${item.maKH}</small>`;
+          div.onclick = function() { selectCustomer(item); };
+          box.appendChild(div);
+        });
+        box.style.display = 'block';
+      }
+
+      // 2. CHỌN KHÁCH HÀNG
+      function selectCustomer(item) {
+        document.getElementById('suggestion-box').style.display = 'none';
+        document.getElementById('searchInput').value = item.tenKH;
+        document.getElementById('rowIndex').value = item.rowIndex;
+        document.getElementById('maKH_hidden').value = item.maKH;
+        document.getElementById('customerInfo').innerText = `Khách: ${item.tenKH} (Mã: ${item.maKH})`;
+        
+        // Reset form
+        document.getElementById('newIndex').value = '';
+        document.getElementById('peopleCount').value = '';
+        document.getElementById('note').value = '';
+        document.getElementById('imageData').value = '';
+        document.getElementById('photoStatus').innerText = '';
+        document.getElementById('previewParams').style.display = 'none';
+        stopCamera();
+        
+        document.getElementById('inputForm').style.display = 'block';
+      }
+
+      // 3. CAMERA
+      function startCamera() {
+        const video = document.getElementById('video');
+        const constraints = { video: { facingMode: 'environment' } };
+        document.getElementById('camera-container').style.display = 'block';
+
+        navigator.mediaDevices.getUserMedia(constraints)
+          .then((stream) => { video.srcObject = stream; })
+          .catch((err) => { alert("Lỗi camera: " + err); });
+      }
+
+      function takePhoto() {
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const context = canvas.getContext('2d');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        // Nén ảnh 0.6
+        const dataURL = canvas.toDataURL('image/jpeg', 0.6);
+        document.getElementById('imageData').value = dataURL;
+        
+        const preview = document.getElementById('previewParams');
+        preview.src = dataURL;
+        preview.style.display = 'inline-block';
+        document.getElementById('photoStatus').innerText = "Đã chụp!";
+        
+        stopCamera();
+        document.getElementById('camera-container').style.display = 'none';
+      }
+
+      function stopCamera() {
+        const video = document.getElementById('video');
+        if (video.srcObject) {
+          video.srcObject.getTracks().forEach(track => track.stop());
+        }
+      }
+
+      // 4. KIỂM TRA & GỬI DỮ LIỆU
+      function checkAndSubmit() {
+        const newIndex = document.getElementById('newIndex').value;
+        if (!newIndex) { alert("Chưa nhập chỉ số!"); return; }
+        
+        const rowIndex = document.getElementById('rowIndex').value;
+        document.getElementById('loadingSpinner').style.display = 'block';
+
+        // Gọi API kiểm tra dữ liệu cũ
+        fetch(`${SCRIPT_URL}?action=check&rowIndex=${rowIndex}`)
+          .then(res => res.json())
+          .then(response => {
+             if (response.hasData) {
+               const confirmMsg = `CẢNH BÁO: Đã có dữ liệu!\n- Ngày nhập: ${response.oldData.time}\n- Chỉ số cũ: ${response.oldData.index}\n\nBạn có muốn GHI ĐÈ không?`;
+               if (confirm(confirmMsg)) {
+                 submitData();
+               } else {
+                 document.getElementById('loadingSpinner').style.display = 'none';
+               }
+             } else {
+               submitData();
+             }
+          })
+          .catch(err => {
+             alert("Lỗi kết nối kiểm tra: " + err);
+             document.getElementById('loadingSpinner').style.display = 'none';
+          });
+      }
+
+      function submitData() {
+        const data = {
+          rowIndex: document.getElementById('rowIndex').value,
+          maKH: document.getElementById('maKH_hidden').value,
+          newIndex: document.getElementById('newIndex').value,
+          peopleCount: document.getElementById('peopleCount').value,
+          note: document.getElementById('note').value,
+          imageData: document.getElementById('imageData').value
+        };
+
+        // Dùng POST text/plain để tránh lỗi CORS Preflight phức tạp
+        fetch(SCRIPT_URL, {
+          method: 'POST',
+          body: JSON.stringify(data)
+        })
+        .then(res => res.json())
+        .then(res => {
+          document.getElementById('loadingSpinner').style.display = 'none';
+          if (res.success) {
+            alert(res.message);
+            document.getElementById('inputForm').style.display = 'none';
+            document.getElementById('searchInput').value = '';
+            document.getElementById('searchInput').focus();
+          } else {
+            alert(res.message);
+          }
+        })
+        .catch(err => {
+          document.getElementById('loadingSpinner').style.display = 'none';
+          alert("Lỗi khi lưu: " + err);
+        });
+      }
+    </script>
+</body>
+</html>
