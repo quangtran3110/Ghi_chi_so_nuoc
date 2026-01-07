@@ -141,7 +141,14 @@
       // 3. CAMERA
       function startCamera() {
         const video = document.getElementById('video');
-        const constraints = { video: { facingMode: 'environment' } };
+        // Dòng code mới: Yêu cầu độ phân giải Full HD (1920x1080)
+const constraints = { 
+    video: { 
+        facingMode: 'environment',
+        width: { ideal: 1920 }, // Thêm dòng này
+        height: { ideal: 1080 } // Thêm dòng này
+    } 
+};
         document.getElementById('camera-container').style.display = 'block';
 
         navigator.mediaDevices.getUserMedia(constraints)
@@ -242,5 +249,6 @@
 </body>
 
 </html>
+
 
 
